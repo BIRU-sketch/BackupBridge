@@ -1,9 +1,17 @@
 from pyrogram import Client
-
-api_id = ''
-api_hash ='' 
-
-
+from dotenv import load_dotenv
+from telethon import TelegramClient,functions
+import os
+from flask_cors import CORS
+from flask import Flask, request, jsonify
+app=Flask(__name__)
+CORS(app)
+array={}
+load_dotenv('.env.local')
+api_id=''
+api_hash=''
+def cls():
+    os.system('cls' if os.name == 'nt' else 'clear')
 class App():
     def __init__(self, api_id, api_hash):
         self.app = Client("my_account", api_id=api_id, api_hash=api_hash)
@@ -38,15 +46,44 @@ class App():
                 print("3.Exit ")
                 choice=input("Enter your choice: ")
                 if choice=="1":
+                    cls()
                     message=input("Enter your message: ")
                     self.send_message(selected_chat.id,message)
                 elif choice=="2":
+                    cls()
                     self.fetch_messages(selected_chat.id)
                 elif choice=="3":
+                    cls()
                     self.app.stop()
                     return
                 else:
                     print("Invalid choice")
-if __name__ == "__main__":
-    app = App(api_id, api_hash)
-    app.main()
+    def sessions(self,choice):
+        if choice == "1":
+            client=TelegramClient('telethon_session',api_id,api_hash)
+            async def monitor_sessions():
+                sessions=await client(functions.account.GetAuthorizationsRequest())
+                cls()
+                for i,session in enumerate(sessions.authorizations,1):
+                    print(f"{i}. {session.device_model} -{session.app_name} ID:({session.hash})")
+                    stuff={
+                        f"{i}":{
+                            "device_model": session.device_model, "app_name": session.app_name, "hash": session.hash
+                            }
+                    }
+                    array[f"{i}"]=stuff
+
+            with client:
+                client.loop.run_until_complete(monitor_sessions())
+        
+if __name__=="__main__":
+    account=App(api_id,api_hash)
+    @app.route('/')
+    def Welcome():
+        return jsonify({"message":"Welcome to Telegram Backup Service! Please use the following commands for specific services: \n 1. /monitor_sessions-To monitor and terminate active sessions \n 2./chat - to just chat"})
+    @app.route('/api/monitor_sessions', methods=['GET'])
+    def monitor_sessions():
+        account.sessions("1")
+        responce={}
+        return jsonify({"message": array})
+    app.run(debug=True,host='0.0.0.0',port=3558)
