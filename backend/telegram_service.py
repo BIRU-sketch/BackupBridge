@@ -1,89 +1,90 @@
 from pyrogram import Client
+from firestore_client import database
+from flask import Flask,jsonify,request
+import asyncio, os
 from dotenv import load_dotenv
 from telethon import TelegramClient,functions
-import os
-from flask_cors import CORS
-from flask import Flask, request, jsonify
+load_dotenv(".env.local")
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
 app=Flask(__name__)
-CORS(app)
-array={}
-load_dotenv('.env.local')
-api_id=''
-api_hash=''
-def cls():
-    os.system('cls' if os.name == 'nt' else 'clear')
-class App():
-    def __init__(self, api_id, api_hash):
-        self.app = Client("my_account", api_id=api_id, api_hash=api_hash)
-    def list_chats(self):
-        print("Fetching chats...")
-        chats=[]
-        for i,dialog in enumerate(self.app.get_dialogs(),1):
-            chat=dialog.chat
-            chat_name=chat.first_name or chat.title or  "Unknown"
-            print(f"{i}. {chat_name} (ID: {chat.id})")
-            chats.append(chat)
-        return chats
-    def fetch_messages(self, chat_id, limit=10):
-        for message in self.app.get_chat_history(chat_id, limit=limit):
-            print(f"{message.from_user.first_name}: {message.text}")
-    def send_message(self, chat_id, text):
-        self.app.send_message(chat_id, text)
-    def main(self):
-        self.app.start()
-        chats=self.list_chats()
-        choice=input("Enter chat number you want to interact with: ")
-        if choice.isdigit():
-            if int(choice)<1 or int(choice)>len(chats):
-                print("Invalid choice")
-                self.app.stop()
-                return
-            selected_chat=chats[int(choice)-1]
-            while True:
-                print("\nOptions")
-                print("1.Send Message")
-                print("2.Fetch messages")
-                print("3.Exit ")
-                choice=input("Enter your choice: ")
-                if choice=="1":
-                    cls()
-                    message=input("Enter your message: ")
-                    self.send_message(selected_chat.id,message)
-                elif choice=="2":
-                    cls()
-                    self.fetch_messages(selected_chat.id)
-                elif choice=="3":
-                    cls()
-                    self.app.stop()
-                    return
-                else:
-                    print("Invalid choice")
-    def sessions(self,choice):
-        if choice == "1":
-            client=TelegramClient('telethon_session',api_id,api_hash)
-            async def monitor_sessions():
-                sessions=await client(functions.account.GetAuthorizationsRequest())
-                cls()
-                for i,session in enumerate(sessions.authorizations,1):
-                    print(f"{i}. {session.device_model} -{session.app_name} ID:({session.hash})")
-                    stuff={
-                        f"{i}":{
-                            "device_model": session.device_model, "app_name": session.app_name, "hash": session.hash
-                            }
-                    }
-                    array[f"{i}"]=stuff
+pyr_app = Client('my_account', api_id=API_ID, api_hash=API_HASH)
 
-            with client:
-                client.loop.run_until_complete(monitor_sessions())
-        
-if __name__=="__main__":
-    account=App(api_id,api_hash)
-    @app.route('/')
-    def Welcome():
-        return jsonify({"message":"Welcome to Telegram Backup Service! Please use the following commands for specific services: \n 1. /monitor_sessions-To monitor and terminate active sessions \n 2./chat - to just chat"})
-    @app.route('/api/monitor_sessions', methods=['GET'])
-    def monitor_sessions():
-        account.sessions("1")
-        responce={}
-        return jsonify({"message": array})
-    app.run(debug=True,host='0.0.0.0',port=3558)
+
+db = database()
+
+class PyrogramFunctions:
+    def __init__(self):
+        self.app = pyr_app
+    def block_user(self, user_id):
+        try:
+            self.app.start()
+            self.app.block_user(user_id)
+        finally:
+            self.app.stop()
+            return f"User {user_id} blocked successfully"
+    
+    def monitor_sessions(self, name):
+        name = name.lower()
+        session_dic = {}
+        telethon_client = TelegramClient('telethon_session', API_ID, API_HASH)
+        async def update_sessions():
+            try:
+                await telethon_client.start()
+                result = await telethon_client(functions.account.GetAuthorizationsRequest())
+                session_dic[name] = []
+                for session in result.authorizations:
+                    session_dic[name].append({
+                        "Device": session.device_model,
+                        "App": session.app_name,
+                        "ID": session.hash
+                        })
+                    db.add("Sessions", name, {"sessions": session_dic[name]})
+            finally:
+                await telethon_client.disconnect()
+        asyncio.run(update_sessions())
+
+    def get_sessions(self,name):
+        name=name.lower()
+        existing_sessions = db.get("Sessions", name)
+        if existing_sessions.to_dict() is None:
+            print("Updating database!")
+            self.monitor_sessions(name)
+            return "Sessions updated successfully"
+        else:
+            return {"Sessions": existing_sessions.to_dict()}
+    def terminate_session(self, name, session_id):
+        telethon_client = TelegramClient('telethon_session', API_ID, API_HASH)
+        async def terminate():
+            try:
+                await telethon_client.start()
+                await telethon_client(functions.account.ResetAuthorizationRequest(session_id))
+            finally:
+                await telethon_client.disconnect()
+        asyncio.run(terminate())
+    def update_chats(self, name):
+        name = name.lower()
+        existing_chats = db.get('Chats',name)
+        chats={}
+        try:
+            self.app.start()
+            chats[name]=[
+                {
+                    "id":chat.chat.id,
+                    "name":chat.chat.title or chat.chat.first_name or chat.chat.last_name
+                }for chat in self.app.get_dialogs()
+            ]
+            db.add("Chats",name,{"chats":chats})
+        finally:
+            self.app.stop()
+        return "Chats retrieved successfully"
+    def get_chats(self,name):
+        name=name.lower()
+        exising_chats=db.get('Chats',name)
+        if exising_chats.to_dict() is None:
+            print("Updating database!")
+            return self.update_chats(name)
+        else:
+            return exising_chats.to_dict()
+account = PyrogramFunctions()
+print(account.get_chats("bi"))

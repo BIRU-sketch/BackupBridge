@@ -7,7 +7,7 @@ class database():
     def get(self, collection, doc):
         return self.db.collection(collection).document(doc).get()
     def get_all(self,collection):
-        return self.db.collection(collection).get()
+         return self.db.collection(collection).get()
     def add(self, collection, doc, data):
         self.db.collection(collection).document(doc).set(data)
     def delete(self, collection, doc):

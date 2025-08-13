@@ -1,2 +1,4 @@
 .env.local
-
+BackupBridge.json
+my_account.session
+telethon_session.session
